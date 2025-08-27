@@ -1,183 +1,207 @@
 import streamlit as st
 import re
 import random
-import html
-from collections import Counter, defaultdict
+from collections import defaultdict, Counter
 
-st.set_page_config(page_title="Text Tokenizer", layout="wide")
+st.set_page_config(page_title="Simple Tokenizer App", layout="wide")
 
-# title
-st.title("Tokenizer playground")
+# Title
+st.title("Tokenizer Playground")
 
-# Dropdown menu for selecting tokenizer type
-tokenizer_type = st.selectbox("Select Tokenizer Type", ["Word-based", "Character-based", "Subword-based"])
+# Dropdown for tokenizer type
+tokenizer_type = st.selectbox("Select Tokenizer Type", ["Word-based", "Character-based", "BPE-encoding"])
 
-# User input text area
-input_text = st.text_area("Enter text to tokenize", height=150, value="Hello, world! This is a tokenizer playground.")
+# User text input
+text_input = st.text_area("Enter your text here:", height=150, value="Ishaan this side, Let's tokenize this sentence.")
 
-# special tokens
-special_tokens = ["<start>", "<end-of-sequence>", "<pad>", "<unk>"]
+# Special tokens
+special_tokens = ["<start>", "<end-of-sequence>"]
 
+if tokenizer_type == "BPE-encoding":
+    num_merges = st.slider("Number of BPE Merges", min_value=1, max_value=50, value=10,
+                           help="Higher values create larger vocabulary and longer tokens.")
+
+# Tokenization logic
 def word_tokenizer(text):
-    tokens = re.findall(r"\b\w+(?:'\w+)\b|[^\w\s]", text.lower())
-    return special_tokens[:1] + tokens + special_tokens[1:2]
+    tokens = re.findall(r"\b\w+(?:'\w+)?\b|[^\w\s]", text.lower())
+    return special_tokens[:1] + tokens + special_tokens[1:]
 
 def char_tokenizer(text):
-    return special_tokens[:1] + list(text) + special_tokens[1:2]
+    return special_tokens[:1] + list(text) + special_tokens[1:]
 
 
-def bpe_tokenizer(text, max_merges=50):
-    """BPE (Byte Pair Encoding) tokenizer implementation."""
-    words = text.lower().split()
-    words_freqs = Counter(words)
+def bpe_tokenizer(text, num_merges=20):
+    """
+    Byte Pair Encoding (BPE) tokenizer
+    """
 
-    # Convert words to character sequences
+    #  Pre-tokenize text into words
+    words = text.split()
+
+    # intialize the word frequencies and convert words to characters sequences
+    word_freqs = Counter(words)
+    
+    # Conver words to sequences of characters with a special end-of-word token
+    vocab = defaultdict(int)
+    for word, freq in word_freqs.items():
+        chars = list(word) + ["</w>"]
+        for char in chars:
+            vocab[char] += freq
+
+    # initalize splits (each words as sequence of characters)
     splits = {}
-    for word in words_freqs:
-        splits[word] = list(word) 
+    for word in word_freqs:
+        splits[word] = list(word) + ["</w>"]
 
-    def get_stats(splits):
-        """Count frequency of consecutive symobol pairs."""
+    # Learn BPE merges
+    merges = []
+    for i in range(num_merges): # Number of merges define it
         pairs = defaultdict(int)
-        for word, freq in splits.items():
-            symbols = word
-            for i in range(len(symbols) - 1):
-                pairs[(symbols[i], symbols[i + 1])] += freq
-        return pairs
+        for word, freq in word_freqs.items():
+            symbols = splits[word]
+            for j in range(len(symbols)-1):
+                pairs[(symbols[j], symbols[j+1])] += freq
+        
+        if not pairs:
+            break
 
-    def merge_symbols(pair, splits):
-        """Merge the most frequent pair"""
-        bigram = pair
+
+        # Find the most frequent pair
+        best_pair = max(pairs, key=pairs.get)
+        merges.append(best_pair)
+
+        # Merge the best pair in all splits
         new_splits = {}
         for word in splits:
             new_word = []
             i = 0
-            while i < len(splits[word]):
-                if (i < len(splits[word]) - 1 and 
-                    splits[word][i] == bigram[0] and 
-                    splits[word][i + 1] == bigram[1]):
-                    new_word.append(bigram[0] + bigram[1])
+            symbols = splits[word]
+            while i < len(symbols):
+                if (
+                    i < len(symbols) - 1 and
+                    symbols[i] == best_pair[0] and
+                    symbols[i+1] == best_pair[1]
+                ):
+                    # Merge the pair
+                    new_word.append(best_pair[0] + best_pair[1])
                     i += 2
                 else:
-                    new_word.append(splits[word][i])
+                    new_word.append(symbols[i])
                     i += 1
             new_splits[word] = new_word
-        return new_splits
+
+        splits = new_splits
+
+        # Add merged token to vocabulary
+        merged_token = best_pair[0] + best_pair[1]
+        vocab[merged_token] = pairs[best_pair]
+
+
+    def apply_bpe(word):
+        """
+        Apply learned BPE merges to a word
+        """
+        if not word:
+            return []
+
+        # start with characters
+        symbols = list(word) + ["</w>"]
+
+        # Apply each merge in order
+        for merge in merges:
+            new_symbols = []
+            i = 0
+            while i < len(symbols):
+                if(i < len(symbols) - 1 and symbols[i] == merge[0] and symbols[i+1] == merge[1]):
+                    new_symbols.append(merge[0] + merge[1])
+                    i += 2
+                else:
+                    new_symbols.append(symbols[i])
+                    i += 1
+            symbols = new_symbols
+        return symbols
     
-
-    for _ in range(max_merges):
-        pairs = get_stats(splits)
-        if not pairs:
-            break
-        best_pais = max(pairs, key=pairs.get)
-        if pairs[best_pais] < 2:
-            break
-
-        splits = merge_symbols(best_pais, splits)
-
-    # Tokenize the input text
     tokens = []
-    for word in text.lower().split():
-        if word in splits:
-            tokens.extend(splits[word])
-        else:
-            tokens.append(list(word)) 
+    for word in words:
+        word_tokens = apply_bpe(word)
+        tokens.extend(word_tokens)
 
-    return special_tokens[:1] + tokens + special_tokens[1:2]
+    return special_tokens[:1] + tokens + special_tokens[1:], dict(vocab), merges
 
 # Assign unique token IDs
 def assign_token_ids(tokens):
     vocab = {}
     token_ids = []
-    next_id = 100 # start from 100 for cleaner visualization
+    next_id = 100  # Start from 100 for cleaner visualization
 
     for token in tokens:
         if token not in vocab:
             vocab[token] = next_id
             next_id += 1
-
         token_ids.append(vocab[token])
     return token_ids, vocab
 
 # Tokenize
+# tokens = word_tokenizer(text_input) if tokenizer_type == "Word-based" else char_tokenizer(text_input)
 if tokenizer_type == "Word-based":
-    tokens = bpe_tokenizer(input_text)
-    st.info("📝 Word-based tokenization splits text into words and punctuation")
+    tokens = word_tokenizer(text_input)
+    token_ids, vocab = assign_token_ids(tokens)
 
 elif tokenizer_type == "Character-based":
-    tokens = char_tokenizer(input_text)
-    st.info("🔤 Character-based tokenization splits text into individual characters")
+    tokens = char_tokenizer(text_input)
+    token_ids, vocab = assign_token_ids(tokens)
+elif tokenizer_type == "BPE-encoding":
+    tokens, bpe_vocab, merges = bpe_tokenizer(text_input, num_merges)
+    # token_ids, vocab = assign_token_ids(tokens)
 
-elif tokenizer_type == "Subword-based":
-    tokens = bpe_tokenizer(input_text)
-    st.info("🧩 Subword-based (BPE) tokenization learns common subword units from the text")
 
 token_ids, vocab = assign_token_ids(tokens)
 
-# Display tokens count
-st.markdown(f"### Total Tokens: {len(tokens)}")
-
-# Display tokens count
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Total Tokens", len(tokens))
-with col2:
-    st.metric("Vocabulary Size", len(vocab))
-with col3:
-    compression_ratio = len(input_text) / len(tokens) if tokens else 0
-    st.metric("Compression Ratio", f"{compression_ratio:.2f}")
-
-
-# Custom colors palette
+# Display token count
+st.markdown(f"###  Token Count: `{len(tokens)}`")
+# Custom color palette
 color_palette = [
     "#8ecae6", "#f2e8cf", "#e9ff70", "#edddd4", "#ffa5ab", 
     "#e0b1cb", "#a2d6f9", "#73e2a7", "#fe6d73", "#ffff3f", "#a594f9"
 ]
 
 # Display colored tokens using custom palette
-st.markdown("### Tokenized Output")
-colored_html = "<div style='line-height: 2.5;'>"
-
+st.markdown("### Tokens")
+colored_html = ""
 for i, token in enumerate(tokens):
-    color = color_palette[i % len(color_palette)]
-    escaped_token = html.escape(str(token))
+    color = color_palette[i % len(color_palette)]  # Cycle through colors
     colored_html += f"""
-    <span style="
-        background-color: {color};
-        color: black;
-        padding: 1px 4px;
-        font-size: 16px;
-        margin: 2px;
-        border-radius: 4px;
-        display: inline-block;
-    ">{token}</span>
-    """
-
-colored_html += "</div>"
+    <span style='
+        background-color:{color};
+        color:black;
+        padding:1px 4px;
+        font-size:15px;
+        margin:2px;
+        display:inline-block;
+    '> {token} </span>"""
 st.markdown(colored_html, unsafe_allow_html=True)
+
 
 # Display token IDs
 st.markdown("### Token IDs")
 text_color = "white"
 bg_color = "#1e1e1e"
 
-
-# Format the token IDs like code blocks
+# Format the token IDs like code
 token_id_html = f"""
-<div style="
-    background-color: {bg_color};
-    color: {text_color};
-    padding: 10px;
-    border-radius: 5px;
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 16px;
-">
-    {token_ids}
+<div style='
+    background-color:{bg_color};
+    color:{text_color};
+    padding:10px;
+    font-size:15px;
+    font-family:monospace;
+'>
+{token_ids}
 </div>
 """
 
 st.markdown(token_id_html, unsafe_allow_html=True)
 
-# Optional: show vocab mapping 
-with st.expander(" View Vocabulary Dictionary "):
-    st.write(vocab)
+# Optional: show vocab mapping
+with st.expander(" View Vocab Dictionary"):
+    st.json(vocab)
