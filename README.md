@@ -1,6 +1,10 @@
 # Word-Tokenizer-from-Scratch
-An interactive Streamlit app to explore how basic tokenizers work.  
-This project demonstrates word-level and character-level tokenization, assigning token IDs and visualizing them with custom colors — just like how tokenization works behind the scenes in LLMs.
+<img width="1818" height="925" alt="Screenshot 2025-08-28 013320" src="https://github.com/user-attachments/assets/82a35e6e-9df3-40c8-a38a-76ee6307767e" />
+
+---
+
+An interactive Streamlit app to explore basic Tokenizers work.  
+This project demonstrates word-level, character-level & Byte-Pair encoding tokenization, assigning token IDs and visualizing them with custom colors — just like how tokenization works behind the scenes in LLMs.
 
 
 ---
